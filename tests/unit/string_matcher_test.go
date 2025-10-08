@@ -6,18 +6,57 @@ import (
 	. "github.com/bolanosdev/query-builder"
 )
 
-func TestQueryBuilder_StringContains(t *testing.T) {
+func TestQueryBuilder_StringEqual(t *testing.T) {
 	query := "select * from accounts"
 	qb := NewQueryBuilder(query)
-	result := qb.Where(ByStringColumn("name", "car", StringContains)).Apply()
+	names := []string{"carlos"}
 
-	expected := "select * from accounts WHERE name LIKE %s;"
+	result, values := qb.Where(ByStringColumn("name", names)).Commit()
+
+	expected := "select * from accounts WHERE name = $1;"
 	if result != expected {
 		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	values := qb.GetValues()
-	if len(values) != 1 || values[0] != "%car%" {
+	if len(values) != 1 {
+		t.Errorf("Expected 1 value, got %d", len(values))
+	}
+	if values[0] != "carlos" {
+		t.Errorf("Expected [carlos], got %v", values)
+	}
+}
+
+func TestQueryBuilder_StringIn(t *testing.T) {
+	query := "select * from accounts"
+	qb := NewQueryBuilder(query)
+	names := []string{"carlos", "john"}
+
+	result, values := qb.Where(ByStringColumn("name", names)).Commit()
+
+	expected := "select * from accounts WHERE name IN ($1, $2);"
+	if result != expected {
+		t.Errorf("Expected: %s\nGot: %s", expected, result)
+	}
+
+	if len(values) != 2 {
+		t.Errorf("Expected 2 values, got %d", len(values))
+	}
+	if values[0] != "carlos" || values[1] != "john" {
+		t.Errorf("Expected [carlos, john], got %v", values)
+	}
+}
+
+func TestQueryBuilder_StringContains(t *testing.T) {
+	query := "select * from accounts"
+	qb := NewQueryBuilder(query)
+	result, values := qb.Where(ByStringColumn("name", []string{"car"}, StringContains)).Commit()
+
+	expected := "select * from accounts WHERE name LIKE '%' || $1 || '%';"
+	if result != expected {
+		t.Errorf("Expected: %s\nGot: %s", expected, result)
+	}
+
+	if len(values) != 1 || values[0] != "car" {
 		t.Errorf("Expected value '%%car%%', got %v", values)
 	}
 }
@@ -25,15 +64,14 @@ func TestQueryBuilder_StringContains(t *testing.T) {
 func TestQueryBuilder_StringStartsWith(t *testing.T) {
 	query := "select * from accounts"
 	qb := NewQueryBuilder(query)
-	result := qb.Where(ByStringColumn("name", "car", StringStartsWith)).Apply()
+	result, values := qb.Where(ByStringColumn("name", []string{"car"}, StringStartsWith)).Commit()
 
-	expected := "select * from accounts WHERE name LIKE %s;"
+	expected := "select * from accounts WHERE name LIKE $1 || '%';"
 	if result != expected {
 		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	values := qb.GetValues()
-	if len(values) != 1 || values[0] != "car%" {
+	if len(values) != 1 || values[0] != "car" {
 		t.Errorf("Expected value 'car%%', got %v", values)
 	}
 }
@@ -41,15 +79,14 @@ func TestQueryBuilder_StringStartsWith(t *testing.T) {
 func TestQueryBuilder_StringEndsWith(t *testing.T) {
 	query := "select * from accounts"
 	qb := NewQueryBuilder(query)
-	result := qb.Where(ByStringColumn("name", "los", StringEndsWith)).Apply()
+	result, values := qb.Where(ByStringColumn("name", []string{"los"}, StringEndsWith)).Commit()
 
-	expected := "select * from accounts WHERE name LIKE %s;"
+	expected := "select * from accounts WHERE name LIKE '%' || $1;"
 	if result != expected {
 		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	values := qb.GetValues()
-	if len(values) != 1 || values[0] != "%los" {
+	if len(values) != 1 || values[0] != "los" {
 		t.Errorf("Expected value '%%los', got %v", values)
 	}
 }
@@ -57,14 +94,13 @@ func TestQueryBuilder_StringEndsWith(t *testing.T) {
 func TestQueryBuilder_StringCaseInsensitive(t *testing.T) {
 	query := "select * from accounts"
 	qb := NewQueryBuilder(query)
-	result := qb.Where(ByStringColumn("name", "Carlos", StringExact, NonSensitive)).Apply()
+	result, values := qb.Where(ByStringColumn("name", []string{"Carlos"}, StringExact, NonSensitive)).Commit()
 
-	expected := "select * from accounts WHERE LOWER(name) = LOWER(%s);"
+	expected := "select * from accounts WHERE LOWER(name) = LOWER($1);"
 	if result != expected {
 		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	values := qb.GetValues()
 	if len(values) != 1 || values[0] != "Carlos" {
 		t.Errorf("Expected value 'Carlos', got %v", values)
 	}
@@ -73,40 +109,44 @@ func TestQueryBuilder_StringCaseInsensitive(t *testing.T) {
 func TestQueryBuilder_StringContainsCaseInsensitive(t *testing.T) {
 	query := "select * from accounts"
 	qb := NewQueryBuilder(query)
-	result := qb.Where(ByStringColumn("name", "CAR", StringContains, NonSensitive)).Apply()
+	result, values := qb.Where(ByStringColumn("name", []string{"CAR"}, StringContains, NonSensitive)).Commit()
 
-	expected := "select * from accounts WHERE name ILIKE %s;"
+	expected := "select * from accounts WHERE LOWER(name) LIKE '%' || LOWER($1) || '%';"
 	if result != expected {
 		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	values := qb.GetValues()
-	if len(values) != 1 || values[0] != "%CAR%" {
-		t.Errorf("Expected value '%%CAR%%', got %v", values)
+	if len(values) != 1 || values[0] != "CAR" {
+		t.Errorf("Expected value 'CAR', got %v", values)
 	}
 }
 
-func TestQueryBuilder_StringInClause(t *testing.T) {
+func TestQueryBuilder_StringStartsWithCaseInsensitive(t *testing.T) {
 	query := "select * from accounts"
 	qb := NewQueryBuilder(query)
-	result := qb.Where(ByStringColumn("name", "carlos", "john")).Apply()
+	result, values := qb.Where(ByStringColumn("name", []string{"CAR"}, StringStartsWith, NonSensitive)).Commit()
 
-	expected := "select * from accounts WHERE name IN %s;"
+	expected := "select * from accounts WHERE LOWER(name) LIKE LOWER($1) || '%';"
 	if result != expected {
 		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	values := qb.GetValues()
-	if len(values) != 1 {
-		t.Errorf("Expected 1 value, got %d", len(values))
+	if len(values) != 1 || values[0] != "CAR" {
+		t.Errorf("Expected value 'CAR', got %v", values)
+	}
+}
+
+func TestQueryBuilder_StringEndsWithCaseInsensitive(t *testing.T) {
+	query := "select * from accounts"
+	qb := NewQueryBuilder(query)
+	result, values := qb.Where(ByStringColumn("name", []string{"LOS"}, StringEndsWith, NonSensitive)).Commit()
+
+	expected := "select * from accounts WHERE LOWER(name) LIKE '%' || LOWER($1);"
+	if result != expected {
+		t.Errorf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	stringSlice, ok := values[0].([]string)
-	if !ok {
-		t.Errorf("Expected []string, got %T", values[0])
-	}
-
-	if len(stringSlice) != 2 || stringSlice[0] != "carlos" || stringSlice[1] != "john" {
-		t.Errorf("Expected [carlos, john], got %v", stringSlice)
+	if len(values) != 1 || values[0] != "LOS" {
+		t.Errorf("Expected value 'LOS', got %v", values)
 	}
 }

@@ -12,6 +12,7 @@ A fluent query builder for Go that makes it easy to build SQL queries with type-
 - 📄 **Pagination** - Limit and Offset support
 - ✅ **Well tested** - 89.1% code coverage with unit and integration tests
 
+
 ## Installation
 
 ```bash
@@ -24,20 +25,23 @@ go get github.com/bolanosdev/query-builder
 import qb "github.com/bolanosdev/query-builder"
 
 // Create a query builder
-query := qb.NewQueryBuilder("SELECT * FROM users")
+builder := qb.NewQueryBuilder("SELECT * FROM users")
 
-// Add conditions and modifiers
-result := query.
-    Where(qb.ByIntColumn("age", 18, 25, 30)).
-    Sort(qb.SortBy("name")).
+// Add conditions and modifiers, then commit to get query and values
+query, values := builder.
+    Where(qb.ByIntColumn("age", []int{18, 25, 30})).
+    SortBy(qb.Sort("name")).
     Limit(10).
-    Apply()
+    Commit()
 
-// Output: SELECT * FROM users WHERE age IN %v ORDER BY name LIMIT 10;
-values := query.GetValues() // [[]int{18, 25, 30}]
+// query: SELECT * FROM users WHERE age IN ($1, $2, $3) ORDER BY name LIMIT 10;
+// values: [18, 25, 30]
+
+// Use directly with database/sql
+rows, err := db.Query(query, values...)
 ```
 ## Warnings
-**⚠️ Security Note:** `GetFormattedValues()` is for display/debugging only. Always use `GetValues()` with parameterized queries for database execution to prevent SQL injection.
+**⚠️ Security Note:** Always use `Commit()` to get both query and values for parameterized queries. The library uses PostgreSQL-style `$n` placeholders to prevent SQL injection.
 
 **⚠️ Early Development Warning**: This library is in active development and has not been battle-tested in production environments. While it includes security features like column name validation and parameterized queries, please thoroughly test and review the generated SQL before using in production. Use at your own risk.
 
@@ -56,32 +60,32 @@ qb := qb.NewQueryBuilder("SELECT * FROM accounts")
 
 ```go
 // Single condition
-qb.Where(qb.ByIntColumn("id", 1))
-// → WHERE id = %v
+qb.Where(qb.ByIntColumn("id", []int{1}))
+// → WHERE id = $1
 
 // Multiple AND conditions
 qb.Where(
-    qb.ByIntColumn("id", 1),
-    qb.ByStringColumn("name", "john"),
+    qb.ByIntColumn("id", []int{1}),
+    qb.ByStringColumn("name", []string{"john"}),
 )
-// → WHERE id = %v AND name = %s
+// → WHERE id = $1 AND name = $2
 
 // OR conditions using helper
 qb.Where(qb.Or(
-    qb.ByIntColumn("id", 1),
-    qb.ByStringColumn("name", "john"),
+    qb.ByIntColumn("id", []int{1}),
+    qb.ByStringColumn("name", []string{"john"}),
 ))
-// → WHERE (id = %v OR name = %s)
+// → WHERE (id = $1 OR name = $2)
 
 // Nested conditions
 qb.Where(
-    qb.ByIntColumn("status", 1),
+    qb.ByIntColumn("status", []int{1}),
     qb.Or(
-        qb.ByStringColumn("role", "admin"),
-        qb.ByStringColumn("role", "moderator"),
+        qb.ByStringColumn("role", []string{"admin"}),
+        qb.ByStringColumn("role", []string{"moderator"}),
     ),
 )
-// → WHERE status = %v AND (role = %s OR role = %s)
+// → WHERE status = $1 AND (role = $2 OR role = $3)
 ```
 
 ### Column Matchers
@@ -90,43 +94,72 @@ qb.Where(
 
 ```go
 // Single value
-qb.ByIntColumn("id", 1)
-// → id = %v
+qb.ByIntColumn("id", []int{1})
+// → id = $1
 
 // Multiple values (IN clause)
-qb.ByIntColumn("id", 1, 2, 3)
-// → id IN %v
+qb.ByIntColumn("id", []int{1, 2, 3})
+// → id IN ($1, $2, $3)
 ```
 
 #### String Columns
 
 ```go
 // Exact match (default)
-qb.ByStringColumn("name", "john")
-// → name = %s
+qb.ByStringColumn("name", []string{"john"})
+// → name = $1
 
 // Multiple values (IN clause)
-qb.ByStringColumn("name", "john", "jane")
-// → name IN %s
+qb.ByStringColumn("name", []string{"john", "jane"})
+// → name IN ($1, $2)
 
-// Contains (case-sensitive by default)
-qb.ByStringColumn("name", "joh", qb.StringContains)
-// → name LIKE %s (value: "%joh%")
+// Contains (case-sensitive by default) - Simplified syntax
+qb.ByStringColumn("name", []string{"joh"}, qb.StringContains)
+// → name LIKE $1 (value: "%joh%")
 
 // Starts with
-qb.ByStringColumn("name", "joh", qb.StringStartsWith)
-// → name LIKE %s (value: "joh%")
+qb.ByStringColumn("name", []string{"joh"}, qb.StringStartsWith)
+// → name LIKE $1 (value: "joh%")
 
 // Ends with
-qb.ByStringColumn("name", "ohn", qb.StringEndsWith)
-// → name LIKE %s (value: "%ohn")
+qb.ByStringColumn("name", []string{"ohn"}, qb.StringEndsWith)
+// → name LIKE $1 (value: "%ohn")
 
-// Case-insensitive
-qb.ByStringColumn("name", "JOHN", qb.StringExact, qb.NonSensitive)
-// → LOWER(name) = LOWER(%s)
+// Case-insensitive exact match - Pass both match type and sensitivity
+qb.ByStringColumn("name", []string{"JOHN"}, qb.StringExact, qb.NonSensitive)
+// → LOWER(name) = LOWER($1)
 
-qb.ByStringColumn("name", "joh", qb.StringContains, qb.NonSensitive)
-// → name ILIKE %s (value: "%joh%")
+// Case-insensitive contains
+qb.ByStringColumn("name", []string{"joh"}, qb.StringContains, qb.NonSensitive)
+// → LOWER(name) LIKE '%' || LOWER($1) || '%'
+
+// Case-insensitive starts with
+qb.ByStringColumn("name", []string{"joh"}, qb.StringStartsWith, qb.NonSensitive)
+// → LOWER(name) LIKE LOWER($1) || '%'
+
+// Case-insensitive ends with
+qb.ByStringColumn("name", []string{"ohn"}, qb.StringEndsWith, qb.NonSensitive)
+// → LOWER(name) LIKE '%' || LOWER($1)
+
+// Alternative: Using StringOpts struct (for complex configurations)
+qb.ByStringColumn("name", []string{"joh"}, qb.StringOpts{
+    Match: qb.StringContains,
+    Sensitivity: qb.NonSensitive,
+})
+// → LOWER(name) LIKE '%' || LOWER($1) || '%'
+```
+
+**Flexible Options:**
+You can pass options in three ways:
+1. **No options** - Defaults to exact match, case-sensitive
+2. **Direct parameters** - `StringMatchType` and/or `StringSensitivityType`
+3. **StringOpts struct** - For explicit configuration
+
+```go
+type StringOpts struct {
+    Match       StringMatchType       // Optional, defaults to StringExact
+    Sensitivity StringSensitivityType // Optional, defaults to Sensitive
+}
 ```
 
 **String Match Types:**
@@ -146,47 +179,56 @@ import "time"
 
 date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 
-// Exact date (default)
-qb.ByDateColumn("created_at", date)
-qb.ByDateColumn("created_at", date, qb.DateExact)
-// → DATE_TRUNC('day', created_at) = DATE_TRUNC('day', %s::timestamp)
+// Exact date match (using On field)
+qb.ByDateColumn("created_at", qb.Dates{On: date})
+// → DATE_TRUNC('day', created_at) = DATE_TRUNC('day', $1::timestamp)
 
-// After date
-qb.ByDateColumn("created_at", date, qb.DateAfter)
-// → created_at > %s
+// After date (using After field)
+qb.ByDateColumn("created_at", qb.Dates{After: date})
+// → created_at > $1
 
-// Before date
-qb.ByDateColumn("created_at", date, qb.DateBefore)
-// → created_at < %s
+// Before date (using Before field)
+qb.ByDateColumn("created_at", qb.Dates{Before: date})
+// → created_at < $1
 
-// Between dates
-startDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-endDate := time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC)
-qb.ByDateColumn("created_at", startDate, endDate, qb.DateBetween)
-// → created_at BETWEEN '2024-01-01T00:00:00Z' AND '2024-12-31T00:00:00Z'
+// Between dates (using both After and Before)
+afterDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+beforeDate := time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC)
+qb.ByDateColumn("created_at", qb.Dates{After: afterDate, Before: beforeDate})
+// → created_at BETWEEN $1 AND $2
 ```
 
-**Date Range Types:**
-- `DateExact` - Exact date match (default)
-- `DateAfter` - After date
-- `DateBefore` - Before date
-- `DateBetween` - Between two dates
+**Dates Structure:**
+```go
+type Dates struct {
+    On     time.Time // Exact date match (takes priority over After/Before)
+    After  time.Time // Range start (after this date)
+    Before time.Time // Range end (before this date)
+}
+```
+
+**Query Logic:**
+- If `On` is set → Exact date match using DATE_TRUNC
+- If only `After` is set → After query (`> $1`)
+- If only `Before` is set → Before query (`< $1`)
+- If both `After` and `Before` are set → Between query
+- If all are zero → Returns empty condition
 
 ### Sorting
 
 ```go
 // Single field (ASC by default)
-qb.SortBy(qb.SortBy("name"))
+qb.SortBy(qb.Sort("name"))
 // → ORDER BY name
 
 // Single field DESC
-qb.SortBy(qb.SortBy("created_at", qb.SortDesc))
+qb.SortBy(qb.Sort("created_at", qb.SortDesc))
 // → ORDER BY created_at DESC
 
 // Multiple fields
 qb.SortBy(
-    qb.SortBy("name"),
-    qb.SortBy("created_at", qb.SortDesc),
+    qb.Sort("name"),
+    qb.Sort("created_at", qb.SortDesc),
 )
 // → ORDER BY name, created_at DESC
 ```
@@ -202,40 +244,25 @@ qb.SortBy(
 qb.Limit(10)
 // → LIMIT 10
 
-// Offset only
+// Offset only (applies default LIMIT 10)
 qb.Offset(20)
-// → OFFSET 20
+// → LIMIT 10 OFFSET 20
 
 // Both
-qb.Limit(10).Offset(20)
-// → LIMIT 10 OFFSET 20
+qb.Limit(50).Offset(20)
+// → LIMIT 50 OFFSET 20
 ```
+
+**Note:** When using `Offset()` without an explicit `Limit()`, a default limit of 10 is automatically applied to prevent unbounded result sets.
 
 ### Generating SQL
 
 ```go
-// Get the SQL query with placeholders
-sql := qb.Apply()
-// Returns: "SELECT * FROM users WHERE id = %v;"
-
-// Get parameter values (for database execution)
-values := qb.GetValues()
-// Returns: []any{1}
-
-// ✅ CORRECT - Use with database/sql
-db.Query(qb.Apply(), qb.GetValues()...)
-
-// Get formatted values (for display/logging ONLY)
-formatted := qb.GetFormattedValues()
-// Returns: []any{"'john'"} for strings, etc.
-
-// ✅ CORRECT - For debugging/logging
-fmt.Println(fmt.Sprintf(qb.Apply(), qb.GetFormattedValues()...))
-// Prints: "SELECT * FROM users WHERE name = 'john';"
-
-// ❌ NEVER DO THIS - SQL injection risk!
-query := fmt.Sprintf(qb.Apply(), qb.GetFormattedValues()...)
-db.Query(query)  // Don't execute formatted queries!
+// Commit returns both query and values in one call
+query, values := qb.Commit()
+// query: "SELECT * FROM users WHERE id = $1;"
+// values: []any{1}
+rows, err := db.Query(query, values...)
 ```
 
 ## Complete Example
@@ -250,48 +277,48 @@ import (
 )
 
 func main() {
-    query := qb.NewQueryBuilder("SELECT * FROM orders")
+    builder := qb.NewQueryBuilder("SELECT * FROM orders")
     
     startDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
     endDate := time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC)
     
-    result := query.
+    query, values := builder.
         Where(
-            qb.ByIntColumn("status", 1, 2), // status IN (1, 2)
+            qb.ByIntColumn("status", []int{1, 2}),
             qb.Or(
-                qb.ByStringColumn("customer", "VIP", qb.StringContains),
-                qb.ByIntColumn("amount", 1000), // amount > threshold
+                qb.ByStringColumn("customer", []string{"VIP"}, qb.StringContains),
+                qb.ByIntColumn("amount", []int{1000}),
             ),
-            qb.ByDateColumn("created_at", startDate, endDate, qb.DateBetween),
+            qb.ByDateColumn("created_at", qb.Dates{After: startDate, Before: endDate}),
         ).
-        Sort(
-            qb.SortBy("created_at", qb.SortDesc),
-            qb.SortBy("amount", qb.SortDesc),
+        SortBy(
+            qb.Sort("created_at", qb.SortDesc),
+            qb.Sort("amount", qb.SortDesc),
         ).
         Limit(50).
         Offset(0).
-        Apply()
+        Commit()
     
-    values := query.GetValues()
-    
-    fmt.Println("SQL:", result)
+    fmt.Println("SQL:", query)
     fmt.Println("Values:", values)
     
     // Use with database/sql
-    rows, err := db.Query(result, values...)
+    rows, err := db.Query(query, values...)
 }
 ```
 
 **Output:**
 ```sql
 SELECT * FROM orders 
-WHERE status IN %v 
-  AND (customer LIKE %s OR amount = %v) 
-  AND created_at BETWEEN '2024-01-01T00:00:00Z' AND '2024-12-31T23:59:59Z' 
+WHERE status IN ($1, $2) 
+  AND (customer LIKE $3 OR amount = $4) 
+  AND created_at BETWEEN $5 AND $6
 ORDER BY created_at DESC, amount DESC 
 LIMIT 50 
 OFFSET 0;
 ```
+
+**Values:** `[1, 2, "%VIP%", 1000, "2024-01-01T00:00:00Z", "2024-12-31T00:00:00Z"]`
 
 ## Logical Grouping
 
@@ -347,22 +374,8 @@ The library is organized into the following files:
 - `query_builder_types.go` - Enums and constants
 - `query_builder_sort.go` - Sorting functionality
 
-## Why This Library?
 
-### Problems Solved
 
-1. **Type Safety** - Compile-time checking for match types and sort directions
-2. **Clean Syntax** - Fluent API that reads like natural language
-3. **No String Concatenation** - Avoid SQL injection vulnerabilities
-4. **Reusable Conditions** - Build conditions independently and combine them
-5. **Complex Queries Made Simple** - Handle nested OR/AND logic easily
-
-### Design Decisions
-
-- **Simplified API**: Removed `And()` and `Or()` methods from QueryBuilder - only use `Where()` for adding conditions
-- **Explicit Prefixes**: All enums use prefixes (`String*`, `Date*`, `Sort*`) to avoid naming conflicts
-- **Immutable Values**: Query builder maintains internal state, values are copied on retrieval
-- **PostgreSQL Focus**: Optimized for PostgreSQL syntax (ILIKE, DATE_TRUNC, etc.)
 
 ## License
 
