@@ -45,5 +45,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test suite with 89.1% code coverage
 - 30 unit tests and 15 integration tests
 
-[0.1.2]: https://github.com/bolanosdev/query-builder/releases/tag/v0.1.2
+[0.1.1]: https://github.com/bolanosdev/query-builder/releases/tag/v0.1.1
 [0.1.0]: https://github.com/bolanosdev/query-builder/releases/tag/v0.1.0
